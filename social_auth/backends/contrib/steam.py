@@ -2,6 +2,9 @@
 SteamCommunity OpenID support
 
 No extra configurations are needed to make this work.
+
+## Based on native Yahoo OpenID backend ##
+
 """
 import logging
 logger = logging.getLogger(__name__)
@@ -22,7 +25,7 @@ class SteamAuth(OpenIdAuth):
     AUTH_BACKEND = SteamBackend
 
     def openid_url(self):
-        """Return Yahoo OpenID service url"""
+        """Return Steam OpenID service url"""
         return STEAM_OPENID_URL
 
 
