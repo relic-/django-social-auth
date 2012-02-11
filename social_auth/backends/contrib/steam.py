@@ -38,7 +38,13 @@ class SteamBackend(OpenIDBackend):
             profile = self.get_steam_profile(response)
             details[USERNAME] = profile["personaname"]
             details["fullname"] = profile["realname"]
-        except Exception as e:
+            try:
+                name = profile["realname"].split(" ", 1)
+                details["first_name"] = name[0]
+                details["last_name"] = name[1]
+            except IndexError:
+                pass
+        except:
             pass
         return details
     
