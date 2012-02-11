@@ -108,10 +108,32 @@ Configuration
 
     TEMPLATE_CONTEXT_PROCESSORS = (
         ...
+        'social_auth.context_processors.social_auth_by_name_backends',
+        'social_auth.context_processors.social_auth_backends',
         'social_auth.context_processors.social_auth_by_type_backends',
     )
 
-   check `social_auth.context_processors`.
+  * ``social_auth_by_name_backends``:
+    Adds a ``social_auth`` dict where each key is a provider name and its value
+    is a UserSocialAuth instance if user has associated an account with that
+    provider, otherwise ``None``.
+
+  * ``social_auth_backends``:
+    Adds a ``social_auth`` dict with keys are ``associated``, ``not_associated`` and
+    ``backends``. ``associated`` key is a list of ``UserSocialAuth`` instances
+    associated with current user. ``not_associated`` is a list of providers names
+    that the current user doesn't have any association yet. ``backends`` holds
+    the list of backend names supported.
+
+  * ``social_auth_by_type_backends``:
+    Simiar to ``social_auth_backends`` but each value is grouped by backend type
+    ``openid``, ``oauth2`` and ``oauth``.
+
+  Check ``social_auth.context_processors`` for details.
+
+  **Note**:
+  ``social_auth_backends`` and ``social_auth_by_type_backends`` don't play nice
+  together.
 
 - Sync database to create needed models::
 
@@ -201,6 +223,12 @@ Configuration
   For other providers, just define settings in the form::
 
       <uppercase backend name>_AUTH_EXTRA_ARGUMENTS = {...}
+
+- Also, you can send extra parameters on request token process by defining
+  settings per provider in the same way explained above but with this other
+  suffix::
+
+      <uppercase backend name>_REQUEST_TOKEN_EXTRA_ARGUMENTS = {...}
 
 - By default the application doesn't make redirects to different domains, to
   disable this behavior::

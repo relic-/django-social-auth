@@ -1,4 +1,5 @@
 import urlparse
+import logging
 from collections import defaultdict
 
 from django.conf import settings
@@ -68,9 +69,10 @@ def group_backend_by_type(items, key=lambda x: x):
         get_backends, OpenIdAuth, BaseOAuth, BaseOAuth2
 
     result = defaultdict(list)
+    backends = get_backends()
 
     for item in items:
-        backend = get_backends()[key(item)]
+        backend = backends[key(item)]
         if issubclass(backend, OpenIdAuth):
             result['openid'].append(item)
         elif issubclass(backend, BaseOAuth2):
@@ -83,6 +85,21 @@ def group_backend_by_type(items, key=lambda x: x):
 def setting(name, default=None):
     """Return setting value for given name or default value."""
     return getattr(settings, name, default)
+
+
+logger = None
+if not logger:
+    logging.basicConfig()
+    logger = logging.getLogger('SocialAuth')
+    logger.setLevel(logging.DEBUG)
+
+
+def log(level, *args, **kwargs):
+    """Small wrapper around logger functions."""
+    { 'debug': logger.debug,
+      'error': logger.error,
+      'exception': logger.exception,
+      'warn': logger.warn }[level](*args, **kwargs)
 
 
 if __name__ == '__main__':

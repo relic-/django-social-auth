@@ -211,10 +211,32 @@ Configuration
 
     TEMPLATE_CONTEXT_PROCESSORS = (
         ...
+        'social_auth.context_processors.social_auth_by_name_backends',
+        'social_auth.context_processors.social_auth_backends',
         'social_auth.context_processors.social_auth_by_type_backends',
     )
 
-   check `social_auth.context_processors`.
+  * ``social_auth_by_name_backends``:
+    Adds a ``social_auth`` dict where each key is a provider name and its value
+    is a UserSocialAuth instance if user has associated an account with that
+    provider, otherwise ``None``.
+
+  * ``social_auth_backends``:
+    Adds a ``social_auth`` dict with keys are ``associated``, ``not_associated`` and
+    ``backends``. ``associated`` key is a list of ``UserSocialAuth`` instances
+    associated with current user. ``not_associated`` is a list of providers names
+    that the current user doesn't have any association yet. ``backends`` holds
+    the list of backend names supported.
+
+  * ``social_auth_by_type_backends``:
+    Simiar to ``social_auth_backends`` but each value is grouped by backend type
+    ``openid``, ``oauth2`` and ``oauth``.
+
+  Check ``social_auth.context_processors`` for details.
+
+  **Note**:
+  ``social_auth_backends`` and ``social_auth_by_type_backends`` don't play nice
+  together.
 
 - Sync database to create needed models::
 
@@ -306,6 +328,12 @@ Configuration
 
       <uppercase backend name>_AUTH_EXTRA_ARGUMENTS = {...}
 
+- Also, you can send extra parameters on request token process by defining
+  settings per provider in the same way explained above but with this other
+  suffix::
+
+      <uppercase backend name>_REQUEST_TOKEN_EXTRA_ARGUMENTS = {...}
+
 - By default the application doesn't make redirects to different domains, to
   disable this behavior::
 
@@ -374,6 +402,73 @@ If any function returns something else beside a ``dict`` or ``None``, the
 workflow will be cut and the value returned immediately, this is useful to
 return ``HttpReponse`` instances like ``HttpResponseRedirect``.
 
+----------------
+Partial Pipeline
+----------------
+
+It's possible to cut the pipeline process to return to the user asking for more
+data and resume the process later, to accomplish this add the entry
+``social_auth.backends.pipeline.misc.save_status_to_session`` (or a similar
+implementation) to the pipeline setting before any entry that returns an
+``HttpResponse`` instance::
+
+    SOCIAL_AUTH_PIPELINE = (
+        ...
+        social_auth.backends.pipeline.misc.save_status_to_session,
+        app.pipeline.redirect_to_basic_user_data_form
+        ...
+    )
+
+When it's time to resume the process just redirect the user to
+``/complete/<backend>/`` view. By default the pipeline will be resumed in the
+next entry after ``save_status_to_session`` but this can be modified by setting
+the following setting to the import path of the pipeline entry to resume
+processing::
+
+    SOCIAL_AUTH_PIPELINE_RESUME_ENTRY = <a zero based index>
+
+``save_status_to_session`` saves needed data into user session, the key can be
+defined by ``SOCIAL_AUTH_PARTIAL_PIPELINE_KEY`` which default value is
+``partial_pipeline``::
+
+    SOCIAL_AUTH_PARTIAL_PIPELINE_KEY = 'partial_pipeline'
+
+Check the `example application`_ to check a basic usage.
+
+
+---------------
+Deprecated bits
+---------------
+
+The following settings are deprecated in favor of pipeline functions.
+
+- These settings should be avoided and override ``get_username`` pipeline entry
+  with the desired behavior::
+
+    SOCIAL_AUTH_FORCE_RANDOM_USERNAME
+    SOCIAL_AUTH_DEFAULT_USERNAME
+    SOCIAL_AUTH_UUID_LENGTH
+    SOCIAL_AUTH_USERNAME_FIXER
+
+- User creation setting should be avoided and remove the entry ``create_user``
+  from pipeline instead::
+
+    SOCIAL_AUTH_CREATE_USERS
+
+- Automatic data update should be stopped by overriding ``update_user_details``
+  pipeline entry instead of using this setting::
+
+    SOCIAL_AUTH_CHANGE_SIGNAL_ONLY
+
+- Extra data retrieval from providers should be stopped by removing
+  ``load_extra_data`` from pipeline instead of using this setting::
+
+    SOCIAL_AUTH_EXTRA_DATA
+
+- Automatic email association should be avoided by removing
+  ``associate_by_email`` pipeline entry instead of using this setting::
+
+    SOCIAL_AUTH_ASSOCIATE_BY_MAIL
 
 -------------
 Usage example
@@ -639,14 +734,15 @@ GitHub
 ------
 GitHub works similar to Facebook (OAuth).
 
-- Register a new application at `GitHub Developers`_, and
+- Register a new application at `GitHub Developers`_, set your site domain as
+  the callback URL or it might cause some troubles when associating accounts,
 
-- fill ``App Id`` and ``App Secret`` values in the settings::
+- Fill ``App Id`` and ``App Secret`` values in the settings::
 
       GITHUB_APP_ID = ''
       GITHUB_API_SECRET = ''
 
-- also it's possible to define extra permissions with::
+- Also it's possible to define extra permissions with::
 
      GITHUB_EXTENDED_PERMISSIONS = [...]
 
@@ -714,11 +810,27 @@ fill the needed account information. Then run::
     cd contrib/tests
     ./runtests.py
 
+---------
+Use Cases
+---------
+Some particular use cases are listed below.
+
+1. Use social auth just for account association (no login)::
+
+    urlpatterns += patterns('',
+        url(r'^associate/(?P<backend>[^/]+)/$', associate,
+            name='socialauth_associate_begin'),
+        url(r'^associate/complete/(?P<backend>[^/]+)/$', associate_complete,
+            name='socialauth_associate_complete'),
+        url(r'^disconnect/(?P<backend>[^/]+)/$', disconnect,
+            name='socialauth_disconnect'),
+        url(r'^disconnect/(?P<backend>[^/]+)/(?P<association_id>[^/]+)/$',
+            disconnect, name='socialauth_disconnect_individual'),
+    )
 
 -------------
 Miscellaneous
 -------------
-
 Join to django-social-auth_ community on Convore_ and bring any questions or
 suggestions that will improve this app.
 
@@ -866,3 +978,4 @@ Base work is copyrighted by:
 .. _Flickr OAuth: http://www.flickr.com/services/api/
 .. _Flickr App Garden: http://www.flickr.com/services/apps/create/
 .. _danielgtaylor: https://github.com/danielgtaylor
+.. _example application: https://github.com/omab/django-social-auth/blob/master/example/local_settings.py.template#L23

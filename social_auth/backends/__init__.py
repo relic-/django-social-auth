@@ -9,9 +9,6 @@ Also the modules *must* define a BACKENDS dictionary with the backend name
 (which is used for URLs matching) and Auth class, otherwise it won't be
 enabled.
 """
-import logging
-logger = logging.getLogger(__name__)
-
 from urllib2 import Request, urlopen
 from urllib import urlencode
 from urlparse import urlsplit
@@ -29,7 +26,7 @@ from django.contrib.auth.backends import ModelBackend
 from django.utils import simplejson
 from django.utils.importlib import import_module
 
-from social_auth.utils import setting
+from social_auth.utils import setting, log
 from social_auth.store import DjangoOpenIDStore
 from social_auth.backends.exceptions import StopPipeline
 
@@ -98,11 +95,22 @@ class SocialAuthBackend(ModelBackend):
             return None
 
         response = kwargs.get('response')
-        details = self.get_user_details(response)
-        uid = self.get_user_id(details, response)
-        out = self.pipeline(PIPELINE, backend=self, uid=uid,
-                            details=details, is_new=False,
+
+        if 'pipeline_index' in kwargs:
+            details = kwargs.pop('details')
+            uid = kwargs.pop('uid')
+            is_new = kwargs.pop('is_new')
+            pipeline = PIPELINE[kwargs['pipeline_index']:]
+        else:
+            details = self.get_user_details(response)
+            uid = self.get_user_id(details, response)
+            is_new = False
+            pipeline = PIPELINE
+
+        out = self.pipeline(pipeline, backend=self, uid=uid,
+                            details=details, is_new=is_new,
                             *args, **kwargs)
+
         if not isinstance(out, dict):
             return out
 
@@ -124,7 +132,7 @@ class SocialAuthBackend(ModelBackend):
             try:
                 mod = import_module(mod_name)
             except ImportError:
-                logger.exception('Error importing pipeline %s', name)
+                log('exception', 'Error importing pipeline %s', name)
             else:
                 func = getattr(mod, func_name, None)
 
@@ -303,9 +311,23 @@ class BaseAuth(object):
         """Completes loging process, must return user instance"""
         raise NotImplementedError('Implement in subclass')
 
+    def continue_pipeline(self, *args, **kwargs):
+        """Continue previos halted pipeline"""
+        kwargs.update({ self.AUTH_BACKEND.name: True })
+        return authenticate(*args, **kwargs)
+
+    def request_token_extra_arguments(self):
+        """Return extra arguments needed on request-token process,
+        setting is per backend and defined by:
+            <backend name in uppercase>_REQUEST_TOKEN_EXTRA_ARGUMENTS.
+        """
+        backend_name = self.AUTH_BACKEND.name.upper().replace('-','_')
+        return setting(backend_name + '_REQUEST_TOKEN_EXTRA_ARGUMENTS', {})
+
     def auth_extra_arguments(self):
-        """Return extra argumens needed on auth process, setting is per bancked
-        and defined by <backend name in uppercase>_AUTH_EXTRA_ARGUMENTS.
+        """Return extra arguments needed on auth process, setting is per
+        backend and defined by:
+            <backend name in uppercase>_AUTH_EXTRA_ARGUMENTS.
         """
         backend_name = self.AUTH_BACKEND.name.upper().replace('-','_')
         return setting(backend_name + '_AUTH_EXTRA_ARGUMENTS', {})
@@ -475,7 +497,8 @@ class ConsumerBasedOAuth(BaseOAuth):
 
     def unauthorized_token(self):
         """Return request for unauthorized token (first stage)"""
-        request = self.oauth_request(token=None, url=self.REQUEST_TOKEN_URL)
+        request = self.oauth_request(token=None, url=self.REQUEST_TOKEN_URL,
+                             extra_params=self.request_token_extra_arguments())
         response = self.fetch_response(request)
         return Token.from_string(response)
 
@@ -612,11 +635,11 @@ if setting('SOCIAL_AUTH_IMPORT_BACKENDS'):
     warn("SOCIAL_AUTH_IMPORT_SOURCES is deprecated")
 
 # Cache for discovered backends.
-BACKENDS = {}
+BACKENDSCACHE = {}
 
 def get_backends(force_load=False):
     """
-    Entry point to the BACKENDS cache. If BACKENDS hasn't been
+    Entry point to the BACKENDS cache. If BACKENDSCACHE hasn't been
     populated, each of the modules referenced in
     AUTHENTICATION_BACKENDS is imported and checked for a BACKENDS
     definition and if enabled, added to the cache.
@@ -633,18 +656,18 @@ def get_backends(force_load=False):
     A force_load boolean arg is also provided so that get_backend
     below can retry a requested backend that may not yet be discovered.
     """
-    if not BACKENDS or force_load:
+    if not BACKENDSCACHE or force_load:
         for auth_backend in setting('AUTHENTICATION_BACKENDS'):
             module = import_module(auth_backend.rsplit(".", 1)[0])
             backends = getattr(module, "BACKENDS", {})
             for name, backend in backends.items():
                 if backend.enabled():
-                    BACKENDS[name] = backend
-    return BACKENDS
+                    BACKENDSCACHE[name] = backend
+    return BACKENDSCACHE
 
 
 def get_backend(name, *args, **kwargs):
-    """Returns a backend by name. Backends are stored in the BACKENDS
+    """Returns a backend by name. Backends are stored in the BACKENDSCACHE
     cache dict. If not found, each of the modules referenced in
     AUTHENTICATION_BACKENDS is imported and checked for a BACKENDS
     definition. If the named backend is found in the module's BACKENDS
@@ -652,12 +675,16 @@ def get_backend(name, *args, **kwargs):
     """
     try:
         # Cached backend which has previously been discovered.
-        return BACKENDS[name](*args, **kwargs)
+        return BACKENDSCACHE[name](*args, **kwargs)
     except KeyError:
         # Force a reload of BACKENDS to ensure a missing
         # backend hasn't been missed.
         get_backends(force_load=True)
         try:
-            return BACKENDS[name](*args, **kwargs)
+            return BACKENDSCACHE[name](*args, **kwargs)
         except KeyError:
             return None
+
+BACKENDS = {
+    'openid': OpenIdAuth
+}
